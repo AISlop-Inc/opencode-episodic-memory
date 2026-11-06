@@ -1,6 +1,9 @@
 // Local, offline embeddings. The default backend lives in a system-Node
 // sidecar so importing the OpenCode plugin never loads ML native addons into
 // its embedded Bun process.
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const DEFAULT_MODEL = "Snowflake/snowflake-arctic-embed-m-v1.5";
@@ -13,7 +16,8 @@ export const QUERY_PREFIX = "Represent this sentence for searching relevant pass
 // degrade embeddings (and this model's window is 512 tokens anyway).
 export const MAX_CHARS = 2000;
 
-const DEFAULT_BATCH_SIZE = 32;
+// Peak sidecar memory follows the batch: 2,016 MiB at 32 and 710 MiB at 4 for the same throughput.
+const DEFAULT_BATCH_SIZE = 4;
 const MAX_BATCH_SIZE = 64;
 const DEFAULT_READY_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
@@ -47,9 +51,13 @@ type Sidecar = {
 
 class SidecarUnavailableError extends Error {}
 
-let sidecar: Sidecar | null = null;
-let nextRequestId = 1;
-let activeOperations = 0;
+type EmbedState = { sidecar: Sidecar | null; nextRequestId: number; activeOperations: number };
+
+// A host may evaluate this module more than once in a process (OpenCode did so per directory for local plugins).
+// Module variables would then start a sidecar per copy, each over 1 GiB, so every copy shares this state.
+const stateKey = Symbol.for("opencode-episodic-memory.embed");
+const processGlobals = globalThis as unknown as Record<symbol, EmbedState | undefined>;
+const state: EmbedState = (processGlobals[stateKey] ??= { sidecar: null, nextRequestId: 1, activeOperations: 0 });
 
 export function getEmbedMode(): EmbedMode {
   const mode = process.env.EPISODIC_EMBED_MODE ?? "sidecar";
@@ -124,9 +132,9 @@ function sidecarGone(child: Sidecar, error: Error): void {
 
 function scheduleIdleStop(child: Sidecar, timeoutMs: number): void {
   clearIdleTimer(child);
-  if (!timeoutMs || !child.initialized || child.stopping || activeOperations !== 0 || sidecar !== child) return;
+  if (!timeoutMs || !child.initialized || child.stopping || state.activeOperations !== 0 || state.sidecar !== child) return;
   const timer = setTimeout(() => {
-    if (sidecar === child && !child.stopping && activeOperations === 0) {
+    if (state.sidecar === child && !child.stopping && state.activeOperations === 0) {
       void stopSidecar(child, new SidecarUnavailableError("Embedding sidecar stopped after being idle"));
     }
   }, timeoutMs);
@@ -163,7 +171,7 @@ function vectorsFromResponse(value: unknown, expectedCount: number, child: Sidec
 function handleLine(child: Sidecar, line: string): void {
   // Output already buffered from a retired process cannot describe the current
   // generation and must not publish a new shutdown state.
-  if (child.stopping || sidecar !== child) return;
+  if (child.stopping || state.sidecar !== child) return;
   let response: unknown;
   try {
     response = JSON.parse(line);
@@ -227,7 +235,7 @@ async function drainStdout(child: Sidecar): Promise<void> {
     }
     if (child.stdout.trim() && !child.stopping) protocolFailure(child, "stdout ended with an incomplete response");
   } catch (error) {
-    if (sidecar === child) sidecarGone(child, sidecarError(`Could not read embedding sidecar output (${String(error)})`, child));
+    if (state.sidecar === child) sidecarGone(child, sidecarError(`Could not read embedding sidecar output (${String(error)})`, child));
   } finally {
     reader.releaseLock();
   }
@@ -247,8 +255,33 @@ async function drainStderr(child: Sidecar): Promise<void> {
   }
 }
 
+function newestInstall(directory: string): string[] {
+  try {
+    return readdirSync(directory)
+      .filter((name) => /^v?\d+\.\d+\.\d+$/.test(name))
+      .sort(Bun.semver.order)
+      .reverse()
+      .map((version) => join(directory, version, "bin", "node"));
+  } catch {
+    return [];
+  }
+}
+
+// An app started from the Dock inherits launchd's PATH, which holds no version manager or Homebrew Node.
+export function findNode(home = homedir(), path = process.env.PATH ?? ""): string {
+  const onPath = Bun.which("node", { PATH: path });
+  if (onPath) return onPath;
+  const candidates = [
+    ...newestInstall(join(home, ".local", "share", "mise", "installs", "node")),
+    ...newestInstall(join(home, ".nvm", "versions", "node")),
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? "node";
+}
+
 function spawnSidecar(): Sidecar {
-  const nodeBinary = process.env.EPISODIC_NODE_BINARY ?? "node";
+  const nodeBinary = process.env.EPISODIC_NODE_BINARY ?? findNode();
   const sidecarPath = fileURLToPath(new URL("./embed-sidecar.mjs", import.meta.url));
   let resolveReady!: () => void;
   let rejectReady!: (error: Error) => void;
@@ -276,13 +309,13 @@ function spawnSidecar(): Sidecar {
   let resolveExit!: () => void;
   const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
   const child: Sidecar = { process: childProcess, pending: new Map(), ready, resolveReady, rejectReady, stderr: "", stdout: "", dimensions: null, stopping: false, failure: null, initialized: false, idleTimer: null, exit, resolveExit };
-  sidecar = child;
+  state.sidecar = child;
   void drainStdout(child);
   void drainStderr(child);
   void childProcess.exited.then(() => {
     clearIdleTimer(child);
-    if (sidecar === child) {
-      sidecar = null;
+    if (state.sidecar === child) {
+      state.sidecar = null;
     }
     rejectAll(child, child.failure ?? sidecarError("Embedding sidecar exited unexpectedly", child));
     child.resolveExit();
@@ -292,7 +325,7 @@ function spawnSidecar(): Sidecar {
 
 async function acquireSidecar(): Promise<Sidecar> {
   while (true) {
-    const child = sidecar;
+    const child = state.sidecar;
     if (child && !child.stopping) return child;
     if (child) await child.exit;
     else return spawnSidecar();
@@ -324,8 +357,8 @@ async function requestSidecar(texts: string[], readyTimeoutMs: number, requestTi
   try {
     child = await acquireSidecar();
     await awaitReady(child, readyTimeoutMs);
-    if (child.stopping || sidecar !== child) throw child.failure ?? new SidecarUnavailableError("Embedding sidecar became unavailable after becoming ready");
-    const id = nextRequestId++;
+    if (child.stopping || state.sidecar !== child) throw child.failure ?? new SidecarUnavailableError("Embedding sidecar became unavailable after becoming ready");
+    const id = state.nextRequestId++;
     return await new Promise<Float32Array[]>((resolve, reject) => {
       const timeout = setTimeout(() => {
         sidecarGone(child, new SidecarUnavailableError(`Embedding sidecar request timed out after ${requestTimeoutMs}ms`));
@@ -339,7 +372,7 @@ async function requestSidecar(texts: string[], readyTimeoutMs: number, requestTi
         reject(error);
       };
       child.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, count: texts.length });
-      if (child.stopping || sidecar !== child) {
+      if (child.stopping || state.sidecar !== child) {
         child.pending.delete(id);
         rejectRequest(new SidecarUnavailableError("Embedding sidecar became unavailable before the request was sent"));
         return;
@@ -372,8 +405,8 @@ async function embedRaw(texts: string[]): Promise<Float32Array[]> {
   const readyTimeoutMs = positiveIntegerEnv("EPISODIC_EMBED_READY_TIMEOUT_MS", DEFAULT_READY_TIMEOUT_MS, MAX_TIMEOUT_MS);
   const requestTimeoutMs = positiveIntegerEnv("EPISODIC_EMBED_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_TIMEOUT_MS, MAX_TIMEOUT_MS);
   const idleTimeoutMs = idleTimeoutEnv();
-  activeOperations += 1;
-  if (sidecar) clearIdleTimer(sidecar);
+  state.activeOperations += 1;
+  if (state.sidecar) clearIdleTimer(state.sidecar);
   try {
     const vectors: Float32Array[] = [];
     for (let index = 0; index < prepared.length; index += batchSize) {
@@ -381,8 +414,8 @@ async function embedRaw(texts: string[]): Promise<Float32Array[]> {
     }
     return vectors;
   } finally {
-    activeOperations -= 1;
-    if (sidecar) scheduleIdleStop(sidecar, idleTimeoutMs);
+    state.activeOperations -= 1;
+    if (state.sidecar) scheduleIdleStop(state.sidecar, idleTimeoutMs);
   }
 }
 

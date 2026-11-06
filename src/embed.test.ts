@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +46,7 @@ delete process.env.EPISODIC_TEST_SIDECAR_READY_DELAY_MS;
 delete process.env.EPISODIC_TEST_SIDECAR_IGNORE_SIGTERM;
 delete process.env.EPISODIC_TEST_SIDECAR_IGNORE_SIGTERM_ONCE;
 
-const { embed, embedQuery, DEFAULT_MODEL, MAX_CHARS, QUERY_PREFIX } = await import("./embed.ts");
+const { embed, embedQuery, findNode, DEFAULT_MODEL, MAX_CHARS, QUERY_PREFIX } = await import("./embed.ts");
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -152,6 +152,40 @@ describe("embedding sidecar protocol", () => {
     expect(started).toHaveLength(1);
     const requests = events().filter(({ event }) => event === "request");
     expect(requests.map(({ texts }) => texts)).toEqual([["first", "second"], ["fragmented"]]);
+  });
+
+  test("shares one sidecar across re-evaluated copies of the module", async () => {
+    const script = `
+      const copies = await Promise.all([1, 2, 3].map((copy) => import(${JSON.stringify(source)} + "?copy=" + copy)));
+      await Promise.all(copies.map((copy, index) => copy.embed(["copy-" + index])));
+    `;
+    const hostLogPath = join(mkdtempSync(join(directory, "copies-")), "sidecar.log");
+    const host = Bun.spawn([process.execPath, "-e", script], {
+      env: { ...process.env, EPISODIC_NODE_BINARY: fixture, EPISODIC_TEST_SIDECAR_LOG: hostLogPath },
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const watchdog = setTimeout(() => host.kill(), 5_000);
+    const exitCode = await host.exited.finally(() => clearTimeout(watchdog));
+    expect(exitCode).toBe(0);
+    const started = readFileSync(hostLogPath, "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((entry) => entry.event === "start");
+    expect(started).toHaveLength(1);
+  });
+
+  test("finds the newest installed Node when PATH has none", () => {
+    const home = mkdtempSync(join(directory, "home-"));
+    const installs = join(home, ".local/share/mise/installs/node");
+    for (const version of ["9.11.2", "24.1.0", "lts"]) {
+      mkdirSync(join(installs, version, "bin"), { recursive: true });
+      writeFileSync(join(installs, version, "bin/node"), "");
+    }
+    expect(findNode(home, "")).toBe(join(installs, "24.1.0/bin/node"));
+
+    const bin = join(home, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "node"), "");
+    chmodSync(join(bin, "node"), 0o755);
+    expect(findNode(home, bin)).toBe(join(bin, "node"));
   });
 
   test("applies document truncation and query prefix before sending", async () => {

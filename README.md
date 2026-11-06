@@ -143,7 +143,7 @@ instruction-tag match — the intent is the same, but our matching is literal.
 | `EPISODIC_EMBED_MODEL` | `Snowflake/snowflake-arctic-embed-m-v1.5` | Transformers.js embedding model |
 | `EPISODIC_EMBED_MODE` | `sidecar` | `sidecar` runs embeddings in Node; `inline` is an explicit escape hatch |
 | `EPISODIC_NODE_BINARY` | `node` | Node 20+ executable used by sidecar mode |
-| `EPISODIC_EMBED_BATCH_SIZE` | `32` | Texts per sidecar request (1-64) |
+| `EPISODIC_EMBED_BATCH_SIZE` | `4` | Texts per sidecar request (1-64) |
 | `EPISODIC_EMBED_READY_TIMEOUT_MS` | `600000` | Maximum wait for sidecar/model startup |
 | `EPISODIC_EMBED_REQUEST_TIMEOUT_MS` | `120000` | Maximum wait for a post-startup embedding request |
 | `EPISODIC_EMBED_IDLE_TIMEOUT_MS` | `300000` | Stop an idle sidecar after this many milliseconds; `0` disables idle eviction |

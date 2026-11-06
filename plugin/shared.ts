@@ -3,7 +3,7 @@
 // - Incremental reindex when a session settles (fire-and-forget, debounced)
 import { z } from "zod";
 import { openSource, getSession, getTranscriptChecked, getTranscriptContext, transcriptHasMarker } from "../src/reader";
-import { canLiveRead, openConfiguredIndex, remoteIndexConfig, type IndexStore } from "../src/store";
+import { canLiveRead, indexDbPath, openConfiguredIndex, remoteIndexConfig, type IndexStore } from "../src/store";
 import { syncSession, syncAll, pruneOrphans } from "../src/indexer";
 import { embedQuery } from "../src/embed";
 import { parseDateArg, formatHits, renderTranscript, renderTranscriptContext, renderIndexedContext } from "../src/format";
@@ -16,19 +16,34 @@ function defineTool<S extends z.ZodRawShape>(definition: {
   return { ...definition, execute: (input: unknown) => definition.execute(z.object(definition.args).parse(input)) };
 }
 
-// Debounce concurrent reindex runs for the same session. Module-scoped because
-// OpenCode v2 creates one plugin instance per location, and each one starts a
-// backfill; the runs must coalesce rather than embed the same backlog repeatedly.
-const inflight = new Map<string, Promise<void>>();
-const pending = new Set<string>();
+// Debounce concurrent reindex runs for the same session. Process-wide because
+// OpenCode v2 creates one plugin instance per location, each one starts a
+// backfill, and a host may evaluate this module per location too; the runs must
+// coalesce rather than embed the same backlog repeatedly. Indexes are shared the
+// same way: an instance has no point at which it could close its own handle.
+type MemoryState = {
+  inflight: Map<string, Promise<void>>;
+  pending: Set<string>;
+  indexes: Map<string, Promise<IndexStore>>;
+};
+const stateKey = Symbol.for("opencode-episodic-memory.memory");
+const processGlobals = globalThis as unknown as Record<symbol, MemoryState | undefined>;
+const state: MemoryState = (processGlobals[stateKey] ??= { inflight: new Map(), pending: new Set(), indexes: new Map() });
+const { inflight, pending, indexes } = state;
 
 export function createMemory(log: (level: "info" | "warn" | "error", message: string) => Promise<void>) {
   const remoteSearch = Boolean(process.env.EPISODIC_INDEX_URL);
-  let configuredIndex: Promise<IndexStore> | undefined;
-  const getIndex = () => configuredIndex ??= openConfiguredIndex().catch((error) => {
-    configuredIndex = undefined;
-    throw error;
-  });
+  const getIndex = () => {
+    const key = process.env.EPISODIC_INDEX_URL ?? indexDbPath();
+    const opened = indexes.get(key);
+    if (opened) return opened;
+    const index = openConfiguredIndex().catch((error) => {
+      indexes.delete(key);
+      throw error;
+    });
+    indexes.set(key, index);
+    return index;
+  };
 
   function reindex(sessionId?: string) {
     const key = sessionId ?? "__all__";
