@@ -94,7 +94,7 @@ test("workflow publishes only manually on main with least permissions", () => {
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /contents: read/);
   assert.match(workflow, /npm pack --ignore-scripts --json/);
-  assert.match(workflow, /secrets.NPM_TOKEN/);
+  assert.doesNotMatch(workflow, /NPM_TOKEN|NODE_AUTH_TOKEN/);
   assert.doesNotMatch(workflow, /contents: write|gh release create|\n  push:/);
 });
 
