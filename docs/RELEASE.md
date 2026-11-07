@@ -1,86 +1,34 @@
-# Release guide
+# npm publishing
 
-Semver while 0.x: breaking changes bump minor, fixes bump patch.
+Package: `@aislop-inc/opencode-episodic-memory` (public).
 
-## Checklist
+## First publish
 
-1. `git checkout main && git pull` — clean tree.
-2. Bump `version` in `package.json`, and update the `bunx` command pins in `README.md`
-   to match (the plugin install and config snippet use `@latest`) — grep for the old `@X.Y.Z` to catch them all.
-3. `bun install && bun run typecheck && bun test && bun run spikes/entrypoint-smoke.ts`
-   (`prepublishOnly` remains a backstop for manual directory publishes; the
-   workflow publishes a preverified tarball and runs these gates explicitly).
-4. `bash spikes/pack-smoke.sh` — packs the tarball and verifies it cleanly
-   installs, imports, and executes the packaged Node-sidecar embedding from a
-   clean dir. First run on a machine downloads the ~110MB model.
-5. Commit the version bump and push the reviewed commit to `main`.
-6. `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag must exactly match
-   `package.json`. `.github/workflows/publish-npm.yml` repeats all release gates,
-   publishes through npm Trusted Publishing, then creates the GitHub release.
-7. `gh run watch` — confirm both the `publish` and `release` jobs succeed.
+1. Ensure npm organization `aislop-inc` exists and your account can publish to it.
+2. Add a granular npm write token with bypass-2FA as the repository Actions secret `NPM_TOKEN`. Never commit it.
+3. Open Actions → **Publish npm package** → **Run workflow**, branch `main`.
+4. Keep `dry-run` checked to test the artifact; uncheck it to publish.
 
-## One-time trusted publishing setup
+## Trusted Publishing
 
-The workflow uses GitHub Actions OIDC and must not have an npm token or
-`NODE_AUTH_TOKEN`. Configure the npm package's Trusted Publisher with:
+After the first publish, configure the package's npm Trusted Publisher:
 
 - Provider: GitHub Actions
-- Organization/user: `robertn702`
+- Organization: `AISlop-Inc` (case-sensitive)
 - Repository: `opencode-episodic-memory`
 - Workflow filename: `publish-npm.yml`
 - Environment: `npm-publish`
-- Permitted action: `npm publish`
+- Allow `npm publish` (not only staged publishing).
 
-The equivalent npm CLI command requires npm 11.15.0 or newer, package write
-access, account-level 2FA, and a supported interactive authentication method:
+Remove `NPM_TOKEN` after OIDC works.
+The workflow uses GitHub-hosted runners, Node 24 and npm >=11.5.1.
+Only manual dispatch on main publishes; pushes and tags never publish.
 
-```bash
-npx npm@^11.15.0 trust github opencode-episodic-memory \
-  --file publish-npm.yml \
-  --repo robertn702/opencode-episodic-memory \
-  --env npm-publish \
-  --allow-publish \
-  --registry https://registry.npmjs.org \
-  --yes
-```
+## Subsequent releases
 
-Before pushing a release tag, apply these GitHub repository controls:
+Commit a new `package.json` version (and package-lock.json if present), push to main, then run the workflow.
+Published npm versions are immutable and cannot be reused.
+The workflow does not change source, versions, tags or GitHub releases.
+Dry-run does not verify npm write permissions or OIDC trust.
 
-1. Create the `npm-publish` environment, disable administrator bypass, require
-   the release maintainer's approval, and restrict deployment to selected tags
-   matching `v*`, with no branch rule. This is intentionally a solo-maintainer
-   confirmation gate, so self-approval remains enabled; it is not an independent
-   review control.
-2. Protect `v*` tag creation, updates, deletion, and non-fast-forward changes.
-   Bypass access should be limited to repository administrators who cut releases.
-3. Protect `main` from deletion and force pushes and require changes through a
-   pull request.
-4. Restrict Actions to `actions/*` and `oven-sh/setup-bun`, and require actions
-   to be pinned to full commit SHAs.
-
-The workflow checks out the immutable triggering commit, validates the tag,
-package identity, repository URL, and registry, and gives `contents: write`
-only to the post-publish GitHub release job. It publishes a single prepacked
-tarball and compares its exact `dist.integrity` against registry.npmjs.org.
-If npm accepts a version but the client loses the response, rerunning the
-workflow safely continues only when the registry integrity matches; a mismatch
-fails without creating a GitHub release. Before creating or accepting an
-existing GitHub release, the workflow also peels the current tag and verifies
-that it still resolves to the exact commit that produced the npm artifact.
-
-## After publishing
-
-- Dogfood: with the plugin entry set to `"opencode-episodic-memory@latest"`,
-  run `opencode plugin update` once npm shows the new version, confirm it with
-  `opencode plugin check`, then restart OpenCode and run an `episodic_search`.
-  OpenCode does not update plugins on its own, so restarting alone keeps the
-  old version.
-- If the embedding model or a transformers.js major changed, state
-  index-validity in the release notes (cosine-verified compatible, or
-  "rebuild required").
-- Keep semantic embedding in the default Node 20+ sidecar. Do not change the
-  default to `EPISODIC_EMBED_MODE=inline`: affected OpenCode/Bun hosts can crash
-  during native-addon shutdown when Transformers.js loads in the embedded Bun
-  process.
-
-Do not add changesets; they remain unnecessary for a single 0.x package.
+See [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers).

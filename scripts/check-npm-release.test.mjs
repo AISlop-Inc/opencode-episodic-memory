@@ -11,7 +11,7 @@ const WORKFLOW = join(
   "../.github/workflows/publish-npm.yml",
 );
 const REPO_URL =
-  "git+https://github.com/robertn702/opencode-episodic-memory.git";
+  "git+https://github.com/AISlop-Inc/opencode-episodic-memory.git";
 const tmpRepos = [];
 
 function makeRepo(overrides = {}) {
@@ -20,7 +20,7 @@ function makeRepo(overrides = {}) {
   writeFileSync(
     join(dir, "package.json"),
     JSON.stringify({
-      name: "opencode-episodic-memory",
+      name: "@aislop-inc/opencode-episodic-memory",
       version: "1.2.3",
       repository: { type: "git", url: REPO_URL },
       ...overrides,
@@ -86,22 +86,16 @@ test("requires a tag argument", () => {
   assert.match(result.stderr, /usage:/);
 });
 
-test("workflow keeps publishing and release permissions separate", () => {
+test("workflow publishes only manually on main with least permissions", () => {
   const workflow = readFileSync(WORKFLOW, "utf8");
-  assert.match(workflow, /tags: \["v\*"\]/);
-  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /github.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /environment: npm-publish/);
   assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /contents: read/);
   assert.match(workflow, /npm pack --ignore-scripts --json/);
-  assert.match(workflow, /npm pack must return exactly one artifact/);
-  assert.match(workflow, /npm pack returned the wrong package identity/);
-  assert.match(workflow, /\^sha512-/);
-  assert.match(workflow, /EXPECTED_INTEGRITY/);
-  assert.match(workflow, /node scripts\/publish-npm-release\.mjs/);
-  assert.match(workflow, /needs: publish[\s\S]*contents: write/);
-  assert.match(workflow, /object_sha" != "\$EXPECTED_SHA"/);
-  assert.match(workflow, /gh release create/);
-  assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN|NPM_TOKEN/);
+  assert.match(workflow, /secrets.NPM_TOKEN/);
+  assert.doesNotMatch(workflow, /contents: write|gh release create|\n  push:/);
 });
 
 process.on("exit", () => {

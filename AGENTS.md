@@ -148,13 +148,11 @@ Semantic search over past OpenCode conversations via native plugin tools.
   pre-bump and compare cosine post-bump before assuming existing indexes stay
   valid (v3↔v4 happened to be identical; don't assume that holds).
 - Reindex manually with `bun run src/cli.ts sync` (idempotent; watermark-based).
-- Releases follow `docs/RELEASE.md`; pushing a matching `vX.Y.Z` tag runs the
-  OIDC trusted-publishing workflow and creates the GitHub release. The artifact
-  gate is `bash spikes/pack-smoke.sh` (pack → clean install → import → real
-  Node-sidecar embed). Keep `src/embed-sidecar.mjs` included in the npm artifact
-  and run the offline fake-sidecar protocol tests without downloading a model.
+- Releases follow `docs/RELEASE.md`; manually dispatch `publish-npm.yml` on main.
+  Tag pushes never publish. Keep `src/embed-sidecar.mjs` in the npm artifact.
+  Run the offline fake-sidecar protocol tests without downloading a model.
   OpenCode v2 does NOT auto-update npm plugins, but `@latest` is safe: dogfood
-  configs use `"opencode-episodic-memory@latest"`, and after a release
+  configs use `"@aislop-inc/opencode-episodic-memory@latest"`, and after a release
   `opencode plugin update` installs the new version into
   `~/.cache/opencode/npm/<spec>/<timestamp>/` (`opencode plugin check` shows
   what is installed). Restart alone never picks up a new publish.

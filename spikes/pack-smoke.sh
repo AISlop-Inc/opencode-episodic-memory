@@ -17,7 +17,7 @@ echo "packed: $TGZ"
 
 mkdir -p "$WORK/cache"
 cat > "$WORK/cache/package.json" <<EOF
-{ "dependencies": { "opencode-episodic-memory": "file:$WORK/$TGZ" } }
+{ "dependencies": { "@aislop-inc/opencode-episodic-memory": "file:$WORK/$TGZ" } }
 EOF
 
 echo "== clean install (bounded by EPISODIC_PACK_INSTALL_TIMEOUT, default 90s) =="
@@ -35,7 +35,7 @@ fi
 
 echo "== import plugin entry =="
 (cd "$WORK/cache" && bun -e "
-const m = await import('opencode-episodic-memory');
+const m = await import('@aislop-inc/opencode-episodic-memory');
 if (m.default?.id !== 'episodic-memory' || typeof m.default.setup !== 'function') throw new Error('v2 plugin export missing');
 console.log('exports ok:', Object.keys(m).join(', '));
 ")
@@ -44,15 +44,15 @@ echo "== opencode server-entrypoint resolution =="
 # Mirrors the resolution OpenCode's plugin loader performs (./server export,
 # then main). Without this, a package can import fine yet be silently skipped
 # by OpenCode. Run against the clean-installed artifact, not the repo source.
-bun run spikes/verify-opencode-entrypoint.ts "$WORK/cache/node_modules/opencode-episodic-memory"
+bun run spikes/verify-opencode-entrypoint.ts "$WORK/cache/node_modules/@aislop-inc/opencode-episodic-memory"
 
 echo "== packaged Node sidecar embed smoke (downloads ~110MB model on first run) =="
-SIDECAR="$WORK/cache/node_modules/opencode-episodic-memory/src/embed-sidecar.mjs"
+SIDECAR="$WORK/cache/node_modules/@aislop-inc/opencode-episodic-memory/src/embed-sidecar.mjs"
 [ -f "$SIDECAR" ] || { echo "missing packaged sidecar: $SIDECAR"; exit 1; }
 echo "packaged sidecar present: $SIDECAR"
 export EPISODIC_EMBED_MODE=sidecar
 (cd "$WORK/cache" && bun -e "
-const { embedQuery } = await import('./node_modules/opencode-episodic-memory/src/embed.ts');
+const { embedQuery } = await import('./node_modules/@aislop-inc/opencode-episodic-memory/src/embed.ts');
 const [v] = await embedQuery('pack smoke test');
 const norm = Math.sqrt(v.reduce((sum, value) => sum + value * value, 0));
 if (v.length !== 768 || Math.abs(norm - 1) > 1e-3) {

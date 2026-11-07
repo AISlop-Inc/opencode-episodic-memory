@@ -1,5 +1,5 @@
 {
-  "name": "opencode-episodic-memory",
+  "name": "@aislop-inc/opencode-episodic-memory",
   "version": "0.4.2",
   "description": "Semantic search over past OpenCode conversations — local embeddings (Transformers.js), SQLite index, native plugin tools. Inspired by obra/episodic-memory, rebuilt natively for OpenCode.",
   "type": "module",
@@ -7,7 +7,7 @@
   "author": "robertn702",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/robertn702/opencode-episodic-memory.git"
+    "url": "git+https://github.com/AISlop-Inc/opencode-episodic-memory.git"
   },
   "keywords": [
     "opencode",
@@ -54,5 +54,8 @@
   "trustedDependencies": [
     "onnxruntime-node",
     "protobufjs"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

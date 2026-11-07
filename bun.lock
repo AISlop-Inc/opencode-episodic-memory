@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "opencode-episodic-memory",
+      "name": "@aislop-inc/opencode-episodic-memory",
       "dependencies": {
         "@huggingface/transformers": "^4.2.0",
         "@libsql/client": "^0.18.0",

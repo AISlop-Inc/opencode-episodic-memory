@@ -2,9 +2,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const PACKAGE_NAME = "opencode-episodic-memory";
+const PACKAGE_NAME = "@aislop-inc/opencode-episodic-memory";
 const REPO_URL =
-  "git+https://github.com/robertn702/opencode-episodic-memory.git";
+  "git+https://github.com/AISlop-Inc/opencode-episodic-memory.git";
 const TAG_RE = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
 const [releaseTag, repoRoot = process.cwd()] = process.argv.slice(2);

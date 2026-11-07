@@ -1,3 +1,6 @@
+> AISlop-Inc npm package: `@aislop-inc/opencode-episodic-memory`.
+> Manual release instructions: [npm publishing](docs/NPM-PUBLISHING.md).
+
 # opencode-episodic-memory
 
 [![skills.sh](https://skills.sh/b/robertn702/opencode-episodic-memory)](https://skills.sh/robertn702/opencode-episodic-memory)
@@ -39,7 +42,7 @@ tends to match injected boilerplate on this corpus.
 ## Install
 
 ```bash
-opencode plugin add opencode-episodic-memory@latest
+opencode plugin add @aislop-inc/opencode-episodic-memory@latest
 ```
 
 This adds the plugin to your global OpenCode config. OpenCode does not update
@@ -50,7 +53,7 @@ Or edit `~/.config/opencode/opencode.jsonc` manually:
 
 ```jsonc
 {
-  "plugins": ["opencode-episodic-memory@latest"]
+  "plugins": ["@aislop-inc/opencode-episodic-memory@latest"]
 }
 ```
 
@@ -82,13 +85,13 @@ OpenCode has downloaded the plugin (i.e. after first launch), copy it out of
 the package cache (if several installs are cached, `ls -t` puts the newest first):
 
 ```bash
-cp -r "$(ls -td ~/.cache/opencode/npm/opencode-episodic-memory@latest/*/ | head -1)node_modules/opencode-episodic-memory/skills/remembering-conversations" ~/.config/opencode/skills/
+cp -r "$(ls -td ~/.cache/opencode/npm/@aislop-inc/opencode-episodic-memory@latest/*/ | head -1)node_modules/opencode-episodic-memory/skills/remembering-conversations" ~/.config/opencode/skills/
 ```
 
 Then backfill existing history and restart OpenCode:
 
 ```bash
-bunx opencode-episodic-memory@0.4.2 sync
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 sync
 ```
 
 ## CLI
@@ -97,16 +100,16 @@ The package ships an `opencode-episodic` binary (requires `bun` on PATH).
 Invoke it through the package spec — pin it to match your plugin version:
 
 ```bash
-bunx opencode-episodic-memory@0.4.2 sync [--force]          # index new/changed sessions
-bunx opencode-episodic-memory@0.4.2 search "query"          # semantic (vector) search
-bunx opencode-episodic-memory@0.4.2 search q --text "terms"  # lexical BM25 (all terms AND-matched, token-based)
-bunx opencode-episodic-memory@0.4.2 search q --hybrid       # fuse vector + BM25 (RRF; opt-in)
-bunx opencode-episodic-memory@0.4.2 search q --after 2026-07-01 --limit 5
-bunx opencode-episodic-memory@0.4.2 read <session-id>       # full transcript (live store)
-bunx opencode-episodic-memory@0.4.2 read <id> --indexed     # local indexed excerpts
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 sync [--force]          # index new/changed sessions
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 search "query"          # semantic (vector) search
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 search q --text "terms"  # lexical BM25 (all terms AND-matched, token-based)
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 search q --hybrid       # fuse vector + BM25 (RRF; opt-in)
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 search q --after 2026-07-01 --limit 5
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 read <session-id>       # full transcript (live store)
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 read <id> --indexed     # local indexed excerpts
 bun run src/cli.ts read <id> --indexed --source laptop     # remote indexed excerpts (development/source checkout)
-bunx opencode-episodic-memory@0.4.2 stats                   # index statistics
-bunx opencode-episodic-memory@0.4.2 doctor                  # diagnose setup
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 stats                   # index statistics
+bunx @aislop-inc/opencode-episodic-memory@0.4.2 doctor                  # diagnose setup
 ```
 
 `--after`/`--before` take `YYYY-MM-DD` (midnight UTC). `--after D` is inclusive
