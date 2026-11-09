@@ -144,12 +144,20 @@ instruction-tag match — the intent is the same, but our matching is literal.
 | `EPISODIC_INDEX_AUTH_TOKEN` | unset | Required for remote network URLs; passed to `@libsql/client` |
 | `EPISODIC_SOURCE_ID` | unset | Required in remote mode; stable device/source identity |
 | `EPISODIC_EMBED_MODEL` | `Snowflake/snowflake-arctic-embed-m-v1.5` | Transformers.js embedding model |
+| `EPISODIC_MIN_SCORE` | `0.35` | Minimum vector cosine, 0–1; use `0` for unfiltered recall. Does not filter BM25 hits in text/hybrid mode. |
 | `EPISODIC_EMBED_MODE` | `sidecar` | `sidecar` runs embeddings in Node; `inline` is an explicit escape hatch |
 | `EPISODIC_NODE_BINARY` | `node` | Node 20+ executable used by sidecar mode |
 | `EPISODIC_EMBED_BATCH_SIZE` | `4` | Texts per sidecar request (1-64) |
 | `EPISODIC_EMBED_READY_TIMEOUT_MS` | `600000` | Maximum wait for sidecar/model startup |
 | `EPISODIC_EMBED_REQUEST_TIMEOUT_MS` | `120000` | Maximum wait for a post-startup embedding request |
 | `EPISODIC_EMBED_IDLE_TIMEOUT_MS` | `300000` | Stop an idle sidecar after this many milliseconds; `0` disables idle eviction |
+
+`episodic_search` also accepts a per-query `minScore` override.
+The default 0.35 is a Snowflake cosine operating point, not an opencode-mem
+hybrid score: it removes some noise but can omit relevant conversations.
+For broader recall use `minScore: 0` or `EPISODIC_MIN_SCORE=0`.
+Changing this cutoff does not require re-embedding; after changing the embedding
+model or recipe, back up the index and run `bun run src/cli.ts sync --force`.
 
 `EPISODIC_EMBED_MODE=inline` loads Transformers.js native addons directly in
 OpenCode's embedded Bun process. It exists only as an explicit compatibility

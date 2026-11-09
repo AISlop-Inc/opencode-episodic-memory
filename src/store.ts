@@ -29,6 +29,16 @@ export function indexDbPath(): string {
   return process.env.EPISODIC_INDEX_DB ?? DEFAULT_INDEX_DB;
 }
 
+export function defaultMinScore(): number {
+  const raw = process.env.EPISODIC_MIN_SCORE;
+  if (raw === undefined) return 0.35;
+  const value = Number(raw);
+  if (!raw.trim() || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error("EPISODIC_MIN_SCORE must be a finite number from 0 to 1.");
+  }
+  return value;
+}
+
 export function openIndex(path: string = indexDbPath()): Database {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
@@ -240,7 +250,7 @@ function scoreVector(db: Database, queryVec: Float32Array, opts: SearchOptions):
     .all(...params);
 
   const dims = queryVec.length;
-  const minScore = opts.minScore ?? 0;
+  const minScore = opts.minScore ?? defaultMinScore();
   return candidates
     // Skip vectors from a different embedding model (e.g. mid-migration or
     // orphaned rows) — a dims mismatch would corrupt the dot product or throw.
@@ -743,6 +753,7 @@ class RemoteIndexStore implements IndexStore {
     if (opts.before !== undefined) { clauses.push("c.time_created < ?"); args.push(opts.before); }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const dims = query.length;
+    const minScore = opts.minScore ?? defaultMinScore();
     const scored: ScoredChunk[] = [];
     const transaction = await this.client.transaction("read");
     try {
@@ -754,7 +765,7 @@ class RemoteIndexStore implements IndexStore {
           const vector = new Float32Array(blob.buffer, blob.byteOffset, dims);
           let score = 0;
           for (let i = 0; i < dims; i++) score += query[i] * vector[i];
-          if (score < (opts.minScore ?? 0)) continue;
+          if (score < minScore) continue;
           scored.push({ source_id: rowString(row, "source_id"), session_id: rowString(row, "session_id"), seq: rowNumber(row, "seq"), time_created: rowNumber(row, "time_created"), score });
         }
         if (result.rows.length < REMOTE_PAGE_SIZE) break;

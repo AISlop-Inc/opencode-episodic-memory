@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canLiveRead, openIndex, replaceSessionChunks, search, textSearch, getIndexedSession, localIndexStore, openConfiguredIndex, remoteIndexConfig } from "./store";
+import { canLiveRead, openIndex, replaceSessionChunks, search, textSearch, getIndexedSession, localIndexStore, openConfiguredIndex, remoteIndexConfig, defaultMinScore } from "./store";
 import { pruneOrphans } from "./indexer";
 import { formatHit } from "./format";
 import type { SourceSession } from "./reader";
@@ -19,6 +19,27 @@ const meta = {
 };
 
 describe("store", () => {
+  test("default cosine cutoff removes weak hits and accepts a validated override", () => {
+    const old = process.env.EPISODIC_MIN_SCORE;
+    try {
+      delete process.env.EPISODIC_MIN_SCORE;
+      replaceSessionChunks(db, meta, [
+        { seq: 0, time_created: 1000, text: "strong", embedding: new Float32Array([1, 0]) },
+        { seq: 1, time_created: 1001, text: "weak", embedding: new Float32Array([0.3, Math.sqrt(0.91)]) },
+      ]);
+      expect(defaultMinScore()).toBe(0.35);
+      expect(search(db, new Float32Array([1, 0])).map(h => h.seq)).toEqual([0]);
+      process.env.EPISODIC_MIN_SCORE = "0";
+      expect(search(db, new Float32Array([1, 0])).map(h => h.seq)).toEqual([0, 1]);
+      for (const value of ["", "NaN", "Infinity", "-0.1", "1.1"]) {
+        process.env.EPISODIC_MIN_SCORE = value;
+        expect(() => defaultMinScore()).toThrow("EPISODIC_MIN_SCORE");
+      }
+    } finally {
+      if (old === undefined) delete process.env.EPISODIC_MIN_SCORE;
+      else process.env.EPISODIC_MIN_SCORE = old;
+    }
+  });
   test("remote live reads require the source identity returned by search", () => {
     const remote = { url: "libsql://example.turso.io", sourceId: "desktop", authToken: "token" };
     expect(canLiveRead(remote, undefined)).toBeFalse();
@@ -261,7 +282,7 @@ describe("store", () => {
       { seq: 0, time_created: 1000, anchor_message_id: "msg_alpha", text: "alpha chunk", embedding: new Float32Array([1, 0]) },
       { seq: 1, time_created: 1001, anchor_message_id: "msg_beta", text: "beta chunk", embedding: new Float32Array([0, 1]) },
     ]);
-    const hits = search(db, new Float32Array([1, 0]));
+    const hits = search(db, new Float32Array([1, 0]), { minScore: 0 });
     expect(hits).toHaveLength(2);
     expect(hits[0].text).toBe("alpha chunk");
     expect(hits[0].score).toBeCloseTo(1);
@@ -274,7 +295,7 @@ describe("store", () => {
     // 4-byte blob while the query is 2 dims (8 bytes) — must be skipped.
     db.run("INSERT INTO chunks (session_id, seq, time_created, text, embedding) VALUES (?, ?, ?, ?, ?)",
       ["ses_test", 99, 1002, "stale wrong-dims chunk", new Float32Array([0.5])]);
-    const hits = search(db, new Float32Array([1, 0]));
+    const hits = search(db, new Float32Array([1, 0]), { minScore: 0 });
     expect(hits.map((h) => h.text)).not.toContain("stale wrong-dims chunk");
     expect(hits).toHaveLength(2);
   });
@@ -303,10 +324,10 @@ describe("store", () => {
     const vec = new Float32Array([1, 0]);
     // % and _ match literally, not as LIKE wildcards.
     expect(search(db, vec, { text: "50%" }).map((h) => h.text)).toEqual(["progress at 50% done"]);
-    expect(search(db, vec, { text: "snake_case" }).map((h) => h.text)).toEqual(["snake_case name here"]);
+    expect(search(db, vec, { text: "snake_case", minScore: 0 }).map((h) => h.text)).toEqual(["snake_case name here"]);
     // a bare % / _ must NOT match everything (would if unescaped).
     expect(search(db, vec, { text: "%" })).toHaveLength(1);
-    expect(search(db, vec, { text: "_" })).toHaveLength(1);
+    expect(search(db, vec, { text: "_", minScore: 0 })).toHaveLength(1);
     // escapeLike escapes the escape char itself: a literal backslash matches
     // only the row containing one.
     expect(search(db, vec, { text: "\\" }).map((h) => h.text)).toEqual(["path \\tmp"]);
