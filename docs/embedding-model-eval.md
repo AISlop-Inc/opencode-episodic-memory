@@ -1,5 +1,11 @@
 # Embedding model eval & decision: snowflake-arctic-embed-m-v1.5
 
+> 履歴資料です。
+> 2026-11-10、このフォークの既定モデルはGranite 311M multilingual r2へ変更しました。
+> 日本語の合成質問474問では、閾値調整後の元会話への到達数がSnowflake 183問、Granite 394問でした。
+> Graniteの設定はq8・CLS・前置きなし・閾値0.84で、Transformers.js 4.3.2を使用します。
+> 以下の2026年7月の英語中心の評価と、新しい日本語評価の数値は別条件です。
+
 **Decision (2026-07-22):** the default embedding model is
 `Snowflake/snowflake-arctic-embed-m-v1.5` (q8, CLS pooling, BGE-style query prefix),
 replacing `Xenova/bge-small-en-v1.5`. This document records the survey, method, and

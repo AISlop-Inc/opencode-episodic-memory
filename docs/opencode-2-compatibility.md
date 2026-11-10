@@ -10,8 +10,9 @@ The [upstream migration](https://github.com/anomalyco/opencode/blob/v2.0.18/pack
 copies old sessions into the v2 tables while preserving IDs and timestamps.
 OpenCode may retain the old tables, but this package never reads them. Finish
 OpenCode's migration before using this version. On the first sync, index rows
-with older unqualified statuses are reprocessed as `indexed-v2`, `empty-v2`, or
-`excluded-v2`, even when their source timestamp has not changed. Deleted
+with older or incompatible recipe statuses are reprocessed even when their source
+timestamp has not changed. Statuses include the model, pooling, quantization,
+input cap and Transformers.js version, not just the v2 source layout. Deleted
 sessions are pruned only after v2 layout validation.
 
 The privacy gate checks the exact marker substring across raw

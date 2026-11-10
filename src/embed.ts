@@ -5,16 +5,8 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-export const DEFAULT_MODEL = "Snowflake/snowflake-arctic-embed-m-v1.5";
-
-// BGE/Snowflake convention (identical prompt for both): prefix QUERIES only.
-// Idempotent via embedQuery().
-export const QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
-
-// Upstream measured retrieval quality peaks at 2000 chars; longer inputs
-// degrade embeddings (and this model's window is 512 tokens anyway).
-export const MAX_CHARS = 2000;
+import { embeddingModel, MAX_CHARS, queryPrefix } from "./embedding-config";
+export { DEFAULT_MODEL, MAX_CHARS, QUERY_PREFIX } from "./embedding-config";
 
 // Peak sidecar memory follows the batch: 2,016 MiB at 32 and 710 MiB at 4 for the same throughput.
 const DEFAULT_BATCH_SIZE = 4;
@@ -55,7 +47,7 @@ type EmbedState = { sidecar: Sidecar | null; nextRequestId: number; activeOperat
 
 // A host may evaluate this module more than once in a process (OpenCode did so per directory for local plugins).
 // Module variables would then start a sidecar per copy, each over 1 GiB, so every copy shares this state.
-const stateKey = Symbol.for("opencode-episodic-memory.embed");
+const stateKey = Symbol.for(`opencode-episodic-memory.embed:${embeddingModel()}`);
 const processGlobals = globalThis as unknown as Record<symbol, EmbedState | undefined>;
 const state: EmbedState = (processGlobals[stateKey] ??= { sidecar: null, nextRequestId: 1, activeOperations: 0 });
 
@@ -296,7 +288,7 @@ function spawnSidecar(): Sidecar {
   let childProcess: Bun.Subprocess<"pipe", "pipe", "pipe">;
   try {
     childProcess = Bun.spawn([nodeBinary, sidecarPath], {
-      env: process.env,
+      env: { ...process.env, EPISODIC_EMBED_MODEL: embeddingModel() },
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -422,7 +414,8 @@ async function embedRaw(texts: string[]): Promise<Float32Array[]> {
 /** Embed documents (conversation chunks). No prefix. */
 export const embed = embedRaw;
 
-/** Embed a search query. Prepends the retrieval prefix. */
+/** Embed a search query with the model-specific retrieval prefix. */
 export function embedQuery(query: string): Promise<Float32Array[]> {
-  return embedRaw([query.startsWith(QUERY_PREFIX) ? query : QUERY_PREFIX + query]);
+  const prefix = queryPrefix();
+  return embedRaw([query.startsWith(prefix) ? query : prefix + query]);
 }

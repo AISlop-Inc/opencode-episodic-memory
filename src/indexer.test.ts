@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syncAll, syncSession } from "./indexer";
 import { localIndexStore, openConfiguredIndex, openIndex, type IndexStore } from "./store";
+import { embeddingIndexStatus } from "./embedding-config";
 
 const dir = mkdtempSync(join(tmpdir(), "episodic-indexer-test-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -75,7 +76,7 @@ test("v2 sync refreshes unqualified index statuses and prunes deleted sessions",
     db.run("DELETE FROM session_message");
     await index.replaceSessionChunks({ ...session, source_time_updated: 1 }, [], "empty");
     expect(await syncAll(db, index)).toMatchObject({ empty: 1, skippedFresh: 0 });
-    expect(await index.getIndexedSession(session.id)).toMatchObject({ status: "empty-v2" });
+    expect(await index.getIndexedSession(session.id)).toMatchObject({ status: embeddingIndexStatus("empty") });
     expect(await syncAll(db, index)).toMatchObject({ skippedFresh: 1 });
     db.run("DELETE FROM session_v2");
     expect(await syncAll(db, index)).toMatchObject({ pruned: 1 });
@@ -97,13 +98,13 @@ test("syncAll keeps a session indexed concurrently while it ran", async () => {
         if (injected) return;
         injected = true;
         db.run("INSERT INTO session_v2 VALUES ('ses_new', 'project', NULL, 'New', '/private', 2, 2, NULL)");
-        await local.replaceSessionChunks(fresh, [], "empty-v2");
+        await local.replaceSessionChunks(fresh, [], embeddingIndexStatus("empty"));
       },
     },
   });
   try {
     expect(await syncAll(db, index)).toMatchObject({ scanned: 1, pruned: 0 });
-    expect(await local.getIndexedSession("ses_new")).toMatchObject({ status: "empty-v2" });
+    expect(await local.getIndexedSession("ses_new")).toMatchObject({ status: embeddingIndexStatus("empty") });
   } finally { local.close(); db.close(); }
 });
 
@@ -123,7 +124,7 @@ test("syncSession does not overwrite a newer row written while it embedded", asy
     const { syncSession } = await import(${JSON.stringify(new URL("./indexer.ts", import.meta.url).pathname)});
     const { getSession } = await import(${JSON.stringify(new URL("./reader.ts", import.meta.url).pathname)});
     const source = new Database(${JSON.stringify(sourcePath)}, { readonly: true });
-    const newer = { id: "ses_race", project_id: "project", parent_id: null, title: "Race", directory: "/dir", time_created: 1, source_time_updated: 5, indexed_at: 5, status: "excluded-v2" };
+    const newer = { id: "ses_race", project_id: "project", parent_id: null, title: "Race", directory: "/dir", time_created: 1, source_time_updated: 5, indexed_at: 5, status: ${JSON.stringify(embeddingIndexStatus("excluded"))} };
     async function run(lookup, force) {
       let lookups = 0, writes = 0;
       const index = {
@@ -139,7 +140,7 @@ test("syncSession does not overwrite a newer row written while it embedded", asy
       // A newer row appeared while embedding: keep it.
       raced: await run((n) => n === 0 ? null : newer, false),
       // The same row before and after: --force rebuilds it even though its watermark is ahead.
-      forced: await run(() => ({ ...newer, status: "indexed-v2" }), true),
+      forced: await run(() => ({ ...newer, status: ${JSON.stringify(embeddingIndexStatus("indexed"))} }), true),
     }));
     process.exit(0);
   `;

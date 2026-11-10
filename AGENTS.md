@@ -36,14 +36,14 @@ Semantic search over past OpenCode conversations via native plugin tools.
 
 ## Hard-won facts (don't rediscover)
 
-- Embedding model is **`Snowflake/snowflake-arctic-embed-m-v1.5` (q8, CLS pooling)**
-  with the BGE-style query prefix on queries only (Snowflake uses the identical
-  prompt). Chosen by empirical eval on our real corpus over bge-small-en-v1.5, nomic
-  v1.5, gte-modernbert, granite-r2, embeddinggemma — see
-  `docs/embedding-model-eval.md`. Key win: negatives score ≤ ~0.33 vs bge's ~0.66,
-  so minScore thresholding is viable. Score scale: true hits ~0.4–0.73, median ~0.56.
-  Pooling MUST be `cls` for this model, not `mean`. Xenova mirrors of nomic/snowflake
-  401 now — use official repos' own ONNX exports.
+- Embedding model is **`onnx-community/granite-embedding-311m-multilingual-r2-ONNX`**,
+  q8, CLS pooling, 768 dimensions, no prefixes, cosine cutoff 0.84.
+  Transformers.js is pinned to 4.3.2, matching the Japanese comparison.
+  Session statuses record the embedding recipe; search excludes incompatible
+  vectors and sync refreshes them even if timestamps match. Sidecar state is
+  shared per model, so a hot reload cannot reuse the previous model's child.
+  `docs/embedding-model-eval.md` records the earlier Snowflake evaluation, not
+  the current default. The Snowflake override still needs its query prefix.
 - Truncate embedded text at 2000 chars (upstream measured quality peaks there);
   the stored chunk text may be longer for display, embed.ts truncates.
 - Sync (CLI `sync` and the plugin's per-session settled-session reindex alike)

@@ -14,6 +14,7 @@ import type { Client, InStatement, Transaction } from "@libsql/client";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { DEFAULT_MODEL, embeddingModel, embeddingIndexStatus } from "./embedding-config";
 
 export const DEFAULT_INDEX_DB = join(homedir(), ".local/share/opencode-episodic-memory/index.db");
 
@@ -31,7 +32,10 @@ export function indexDbPath(): string {
 
 export function defaultMinScore(): number {
   const raw = process.env.EPISODIC_MIN_SCORE;
-  if (raw === undefined) return 0.35;
+  if (raw === undefined) {
+    const model = embeddingModel();
+    return model === DEFAULT_MODEL ? 0.84 : model.includes("snowflake-arctic") ? 0.35 : 0;
+  }
   const value = Number(raw);
   if (!raw.trim() || !Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error("EPISODIC_MIN_SCORE must be a finite number from 0 to 1.");
@@ -159,7 +163,7 @@ export function replaceSessionChunks(
   db: Database,
   s: { id: string; project_id: string; parent_id: string | null; title: string; directory: string; time_created: number; source_time_updated: number },
   chunks: { seq: number; time_created: number; text: string; embedding: Float32Array; anchor_message_id?: string | null }[],
-  status: string = "indexed"
+  status: string = embeddingIndexStatus("indexed")
 ): void {
   db.transaction(() => {
     db.run(
@@ -242,10 +246,12 @@ function filterClauses(opts: SearchOptions): { clauses: string[]; params: (strin
 // cost is dims arithmetic, not full-row materialization.
 function scoreVector(db: Database, queryVec: Float32Array, opts: SearchOptions): ScoredChunk[] {
   const { clauses, params } = filterClauses(opts);
+  clauses.push("s.status = ?");
+  params.push(embeddingIndexStatus("indexed"));
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const candidates = db
     .prepare<{ session_id: string; seq: number; time_created: number; embedding: Uint8Array }, (string | number)[]>(
-      `SELECT c.session_id, c.seq, c.time_created, c.embedding FROM chunks c ${where}`
+      `SELECT c.session_id, c.seq, c.time_created, c.embedding FROM chunks c JOIN sessions s ON s.id = c.session_id ${where}`
     )
     .all(...params);
 
@@ -421,13 +427,13 @@ export function stats(db: Database): IndexStats {
   }
   return {
     sessions: one<{ n: number }>("SELECT COUNT(*) n FROM sessions").n,
-    excluded: one<{ n: number }>("SELECT COUNT(*) n FROM sessions WHERE status NOT IN ('indexed', 'indexed-v2')").n,
+    excluded: one<{ n: number }>("SELECT COUNT(*) n FROM sessions WHERE status != 'indexed' AND status NOT LIKE 'indexed-%'").n,
     chunks: one<{ n: number }>("SELECT COUNT(*) n FROM chunks").n,
     oldest: one<{ t: number | null }>("SELECT MIN(time_created) t FROM chunks").t,
     newest: one<{ t: number | null }>("SELECT MAX(time_created) t FROM chunks").t,
     byDirectory: db
       .prepare<{ directory: string; n: number }, []>(
-        "SELECT directory, COUNT(*) n FROM sessions WHERE status IN ('indexed', 'indexed-v2') GROUP BY directory ORDER BY n DESC LIMIT 10"
+        "SELECT directory, COUNT(*) n FROM sessions WHERE status = 'indexed' OR status LIKE 'indexed-%' GROUP BY directory ORDER BY n DESC LIMIT 10"
       )
       .all(),
   };
@@ -711,7 +717,7 @@ class RemoteIndexStore implements IndexStore {
     };
   }
 
-  async replaceSessionChunks(session: { id: string; project_id: string; parent_id: string | null; title: string; directory: string; time_created: number; source_time_updated: number }, chunks: { seq: number; time_created: number; text: string; embedding: Float32Array; anchor_message_id?: string | null }[], status: string = "indexed"): Promise<void> {
+  async replaceSessionChunks(session: { id: string; project_id: string; parent_id: string | null; title: string; directory: string; time_created: number; source_time_updated: number }, chunks: { seq: number; time_created: number; text: string; embedding: Float32Array; anchor_message_id?: string | null }[], status: string = embeddingIndexStatus("indexed")): Promise<void> {
     const statements: InStatement[] = [{
       sql: `INSERT INTO episodic_sessions (source_id, session_id, project_id, parent_id, title, directory, time_created, source_time_updated, indexed_at, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -747,8 +753,8 @@ class RemoteIndexStore implements IndexStore {
   async search(query: Float32Array, opts: SearchOptions = {}): Promise<SearchHit[]> {
     if (opts.hybrid) throw new Error("Hybrid search is unavailable with EPISODIC_INDEX_URL; remote indexes support vector search only.");
     if (opts.text) throw new Error("Text filtering is unavailable with EPISODIC_INDEX_URL; remote indexes support vector search only.");
-    const clauses: string[] = [];
-    const args: (string | number)[] = [];
+    const clauses: string[] = ["s.status = ?"];
+    const args: (string | number)[] = [embeddingIndexStatus("indexed")];
     if (opts.after !== undefined) { clauses.push("c.time_created >= ?"); args.push(opts.after); }
     if (opts.before !== undefined) { clauses.push("c.time_created < ?"); args.push(opts.before); }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -758,7 +764,7 @@ class RemoteIndexStore implements IndexStore {
     const transaction = await this.client.transaction("read");
     try {
       for (let offset = 0; ; offset += REMOTE_PAGE_SIZE) {
-        const result = await transaction.execute({ sql: `SELECT c.source_id, c.session_id, c.seq, c.time_created, c.embedding FROM episodic_chunks c ${where} ORDER BY c.source_id, c.session_id, c.seq LIMIT ? OFFSET ?`, args: [...args, REMOTE_PAGE_SIZE, offset] });
+        const result = await transaction.execute({ sql: `SELECT c.source_id, c.session_id, c.seq, c.time_created, c.embedding FROM episodic_chunks c JOIN episodic_sessions s ON s.source_id = c.source_id AND s.session_id = c.session_id ${where} ORDER BY c.source_id, c.session_id, c.seq LIMIT ? OFFSET ?`, args: [...args, REMOTE_PAGE_SIZE, offset] });
         for (const row of result.rows) {
           const blob = rowBlob(row, "embedding");
           if (blob.byteLength !== dims * 4) continue;
@@ -799,9 +805,9 @@ class RemoteIndexStore implements IndexStore {
   }
   async stats(): Promise<IndexStats> {
     const sessions = await this.client.execute("SELECT COUNT(*) AS n FROM episodic_sessions");
-    const excluded = await this.client.execute("SELECT COUNT(*) AS n FROM episodic_sessions WHERE status NOT IN ('indexed', 'indexed-v2')");
+    const excluded = await this.client.execute("SELECT COUNT(*) AS n FROM episodic_sessions WHERE status != 'indexed' AND status NOT LIKE 'indexed-%'");
     const chunks = await this.client.execute("SELECT COUNT(*) AS n, MIN(time_created) AS oldest, MAX(time_created) AS newest FROM episodic_chunks");
-    const directories = await this.client.execute("SELECT directory, COUNT(*) AS n FROM episodic_sessions WHERE status IN ('indexed', 'indexed-v2') GROUP BY directory ORDER BY n DESC LIMIT 10");
+    const directories = await this.client.execute("SELECT directory, COUNT(*) AS n FROM episodic_sessions WHERE status = 'indexed' OR status LIKE 'indexed-%' GROUP BY directory ORDER BY n DESC LIMIT 10");
     const chunk = chunks.rows[0];
     if (!chunk) throw new Error("Remote stats query returned no row.");
     return { sessions: rowNumber(sessions.rows[0], "n"), excluded: rowNumber(excluded.rows[0], "n"), chunks: rowNumber(chunk, "n"), oldest: chunk.oldest === null ? null : rowNumber(chunk, "oldest"), newest: chunk.newest === null ? null : rowNumber(chunk, "newest"), byDirectory: directories.rows.map((row) => ({ directory: rowString(row, "directory"), n: rowNumber(row, "n") })) };

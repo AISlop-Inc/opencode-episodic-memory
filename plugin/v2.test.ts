@@ -8,6 +8,7 @@ import { getIndexedSession, openIndex } from "../src/store";
 import { formatLogLine, openCodeLogFile } from "./log";
 import { createMemory } from "./shared";
 import v2 from "./v2";
+import { embeddingIndexStatus } from "../src/embedding-config";
 
 const root = mkdtempSync(join(tmpdir(), "episodic-plugin-v2-test-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -130,7 +131,7 @@ describe("v2 plugin reindex trigger", () => {
       events.push(settled("session.execution.interrupted", "ses_stopped", { reason: "user" }));
       // The log line is written after the index row, so wait for both.
       await waitFor(() => ["ses_done", "ses_failed", "ses_stopped"].every((id) =>
-        indexed(id) === "empty-v2" && logText().includes(`message="[episodic-memory] reindexed ${id}"`)));
+        indexed(id) === embeddingIndexStatus("empty") && logText().includes(`message="[episodic-memory] reindexed ${id}"`)));
       expect(indexed("ses_shutdown")).toBeUndefined();
       expect(indexed("ses_superseded")).toBeUndefined();
     } finally {
@@ -142,7 +143,7 @@ describe("v2 plugin reindex trigger", () => {
     addSession("ses_missed");
     const cleanup = await start(eventStream().subscribe);
     try {
-      await waitFor(() => indexed("ses_missed") === "empty-v2" && logText().includes("reindexed __all__"));
+      await waitFor(() => indexed("ses_missed") === embeddingIndexStatus("empty") && logText().includes("reindexed __all__"));
       expect(logText()).toContain("started; backfilling local index");
     } finally {
       await cleanup();

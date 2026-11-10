@@ -29,7 +29,7 @@ flowchart LR
     end
 
     subgraph NodeSidecar["Idle-evictable system Node 20+ sidecar"]
-        ES[embed-sidecar.mjs<br/>Transformers.js singleton while warm<br/>Snowflake arctic-embed-m<br/>q8 · CLS pool · 768 dims]
+        ES[embed-sidecar.mjs<br/>Transformers.js singleton while warm<br/>Granite 311M multilingual r2<br/>q8 · CLS pool · 768 dims]
     end
 
     subgraph Index["Index (read/write; local default or opt-in remote)"]
@@ -145,10 +145,10 @@ chunks_fts  FTS5 virtual table, external content over chunks.text,
   load dynamic extensions, so sqlite-vec is impossible inside the plugin; FTS5
   is compiled in, which is why lexical BM25 *is* available.
 - `source_time_updated` is the incremental-sync watermark; the status suffix
-  `-v2` distinguishes v2 indexes from older unqualified statuses. The first
-  v2 sync re-embeds even when migration preserves timestamps and IDs. Both
-  local and remote indexes recognize `indexed-v2` as indexed; no chunks-table
-  rebuild or VACUUM occurs.
+  includes the model, pooling, quantization, input cap and Transformers.js version.
+  Sync re-embeds stale recipes even when timestamps and IDs match.
+  Local and remote vector searches accept only the current indexed recipe;
+  text search remains available for older rows. No chunks-table rebuild or VACUUM occurs.
 - `status` records why a session has no chunks (`indexed` | `excluded` |
   `empty`) and keeps a tombstone row (metadata only) so stats can report
   excluded/empty sessions. A changed session is always re-read and re-checked
@@ -271,7 +271,7 @@ Key properties:
 
 ```mermaid
 flowchart TB
-    Q[query text] --> EQ["embedQuery in Bun<br/>prepend retrieval prefix,<br/>truncate at 2000 chars"]
+    Q[query text] --> EQ["embedQuery in Bun<br/>model-specific prefix,<br/>truncate at 2000 chars"]
     EQ <-->|NDJSON| N["Node sidecar<br/>embed 768-dim"]
     EQ --> V["scoreVector<br/>brute-force cosine over all<br/>candidate embedding blobs<br/>+ time/text filters + minScore"]
 
@@ -314,13 +314,12 @@ Design notes on retrieval:
   hits. Hybrid scores are RRF-scale (~0.03), a *different* scale from cosine
   (~0.4–0.7) — output labels them `rrf:` so they're never misread against the
   cosine thresholds.
-- **Asymmetric embedding**: queries get the BGE/Snowflake retrieval prefix
-  ("Represent this sentence for searching relevant passages: "), documents go
-  through unmodified. Pooling must be `cls` (not `mean`) for this model; both
+- **Embedding recipe**: Granite uses no query/document prefix. The Snowflake
+  override retains its query-only retrieval prefix. Pooling is `cls`; both
   sides are L2-normalized, so cosine = dot product.
 - **Truncation**: chunk text is capped at 4000 chars for storage/display;
   embedding input is further truncated to 2000 chars, where upstream measured
-  retrieval quality peaks (the model's window is 512 tokens anyway).
+  the comparison used this same production input cap.
 
 `episodic_read_window` requires `source_id` for remote indexes. For the current
 source it uses `getTranscriptContext` to validate the same privacy-gated bounded

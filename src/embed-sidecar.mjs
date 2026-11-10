@@ -11,7 +11,7 @@ globalThis.console = {
 
 // Keep this fallback synchronized with DEFAULT_MODEL in embed.ts; embed.test.ts
 // guards against accidental drift between the Bun host and Node sidecar.
-const model = process.env.EPISODIC_EMBED_MODEL ?? "Snowflake/snowflake-arctic-embed-m-v1.5";
+const model = process.env.EPISODIC_EMBED_MODEL ?? "onnx-community/granite-embedding-311m-multilingual-r2-ONNX";
 const MAX_REQUEST_TEXTS = 64;
 const batchSize = positiveIntegerEnv("EPISODIC_EMBED_BATCH_SIZE", 4, MAX_REQUEST_TEXTS);
 let embedder;

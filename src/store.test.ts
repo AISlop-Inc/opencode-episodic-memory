@@ -7,6 +7,7 @@ import { canLiveRead, openIndex, replaceSessionChunks, search, textSearch, getIn
 import { pruneOrphans } from "./indexer";
 import { formatHit } from "./format";
 import type { SourceSession } from "./reader";
+import { embeddingIndexStatus } from "./embedding-config";
 
 const dir = mkdtempSync(join(tmpdir(), "episodic-store-test-"));
 const db = openIndex(join(dir, "index.db"));
@@ -27,7 +28,7 @@ describe("store", () => {
         { seq: 0, time_created: 1000, text: "strong", embedding: new Float32Array([1, 0]) },
         { seq: 1, time_created: 1001, text: "weak", embedding: new Float32Array([0.3, Math.sqrt(0.91)]) },
       ]);
-      expect(defaultMinScore()).toBe(0.35);
+      expect(defaultMinScore()).toBe(0.84);
       expect(search(db, new Float32Array([1, 0])).map(h => h.seq)).toEqual([0]);
       process.env.EPISODIC_MIN_SCORE = "0";
       expect(search(db, new Float32Array([1, 0])).map(h => h.seq)).toEqual([0, 1]);
@@ -46,6 +47,37 @@ describe("store", () => {
     expect(canLiveRead(remote, "laptop")).toBeFalse();
     expect(canLiveRead(remote, "desktop")).toBeTrue();
     expect(canLiveRead(null, undefined)).toBeTrue();
+  });
+
+  test("same-dimension vectors from another model are not searched", async () => {
+    const index = localIndexStore(db);
+    const chunk = { seq: 0, time_created: 1000, text: "model migration", embedding: new Float32Array([1, 0]) };
+    await index.replaceSessionChunks(meta, [chunk], "indexed-v2");
+    expect(await index.search(new Float32Array([1, 0]))).toEqual([]);
+    expect(await index.textSearch("migration")).toHaveLength(1);
+    await index.replaceSessionChunks(meta, [chunk], embeddingIndexStatus("indexed"));
+    expect(await index.search(new Float32Array([1, 0]))).toHaveLength(1);
+  });
+
+  test("remote search also rejects same-dimension legacy model rows", async () => {
+    const previous = { url: process.env.EPISODIC_INDEX_URL, source: process.env.EPISODIC_SOURCE_ID, token: process.env.EPISODIC_INDEX_AUTH_TOKEN };
+    process.env.EPISODIC_INDEX_URL = `file:${join(dir, "recipe-remote.db")}`;
+    process.env.EPISODIC_SOURCE_ID = "recipe-test";
+    delete process.env.EPISODIC_INDEX_AUTH_TOKEN;
+    try {
+      const index = await openConfiguredIndex();
+      try {
+        const chunk = { seq: 0, time_created: 1000, text: "old model", embedding: new Float32Array([1, 0]) };
+        await index.replaceSessionChunks(meta, [chunk], "indexed-v2");
+        expect(await index.search(new Float32Array([1, 0]))).toEqual([]);
+        await index.replaceSessionChunks(meta, [chunk]);
+        expect(await index.search(new Float32Array([1, 0]))).toHaveLength(1);
+      } finally { index.close(); }
+    } finally {
+      if (previous.url === undefined) delete process.env.EPISODIC_INDEX_URL; else process.env.EPISODIC_INDEX_URL = previous.url;
+      if (previous.source === undefined) delete process.env.EPISODIC_SOURCE_ID; else process.env.EPISODIC_SOURCE_ID = previous.source;
+      if (previous.token === undefined) delete process.env.EPISODIC_INDEX_AUTH_TOKEN; else process.env.EPISODIC_INDEX_AUTH_TOKEN = previous.token;
+    }
   });
 
   test("remote configuration requires a source and network token", async () => {
@@ -559,9 +591,9 @@ describe("store", () => {
     ]);
     const vec = new Float32Array([1, 0]);
     // Pure vector keeps seq0 first (higher cosine).
-    expect(search(db, vec).map((h) => h.seq)).toEqual([0, 1]);
+    expect(search(db, vec, { minScore: 0 }).map((h) => h.seq)).toEqual([0, 1]);
     // Hybrid flips to seq1-first — asserting ORDER, not just set membership.
-    const hybrid = search(db, vec, { hybrid: true, queryText: "kubernetes deployment" });
+    const hybrid = search(db, vec, { hybrid: true, queryText: "kubernetes deployment", minScore: 0 });
     expect(hybrid.map((h) => h.seq)).toEqual([1, 0]);
   });
 

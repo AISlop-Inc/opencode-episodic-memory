@@ -5,6 +5,7 @@ import { getTranscriptChecked, listSessions, transcriptHasMarker, type SourceSes
 import { parseTranscript, exchangeText } from "./parser";
 import { embed } from "./embed";
 import type { IndexStore } from "./store";
+import { embeddingIndexStatus, isCurrentIndexStatus } from "./embedding-config";
 
 export interface SyncResult {
   scanned: number;
@@ -37,8 +38,8 @@ export async function syncSession(
   if (await removeIfRemoteExcluded()) return "excluded";
   // Earlier indexes used unqualified statuses. Force one v2 reindex even when
   // migrated sessions retain their IDs and timestamps.
-  const status = (kind: "indexed" | "excluded" | "empty") => `${kind}-v2`;
-  if (!force && prior?.status.endsWith("-v2") && prior.source_time_updated >= s.time_updated) return "fresh";
+  const status = embeddingIndexStatus;
+  if (!force && prior && isCurrentIndexStatus(prior.status) && prior.source_time_updated >= s.time_updated) return "fresh";
 
   // Authoritative opt-out gate lives inside getTranscriptChecked (raw-blob
   // scan before any read); parseTranscript's own parsed-text check is a
@@ -74,7 +75,7 @@ export async function syncSession(
   // against this run's own read so --force still rebuilds unchanged rows.
   const current = await index.getIndexedSession(s.id);
   const changed = current && (current.indexed_at !== prior?.indexed_at || current.source_time_updated !== prior?.source_time_updated);
-  if (changed && current.status.endsWith("-v2") && current.source_time_updated > s.time_updated) return "fresh";
+  if (changed && isCurrentIndexStatus(current.status) && current.source_time_updated > s.time_updated) return "fresh";
   // Embedding can take long enough for the source conversation to change. Run
   // the cheap authoritative raw-marker check again immediately before a remote
   // upload so a marker added during embedding never exports the prepared data.
