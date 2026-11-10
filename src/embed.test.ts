@@ -47,6 +47,7 @@ delete process.env.EPISODIC_TEST_SIDECAR_IGNORE_SIGTERM;
 delete process.env.EPISODIC_TEST_SIDECAR_IGNORE_SIGTERM_ONCE;
 
 const { embed, embedQuery, findNode, DEFAULT_MODEL, MAX_CHARS, QUERY_PREFIX } = await import("./embed.ts");
+const { queryPrefix, embeddingIndexStatus } = await import("./embedding-config");
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -201,6 +202,16 @@ describe("embedding sidecar protocol", () => {
 
   test("keeps the host and sidecar default model synchronized", () => {
     expect(readFileSync(sidecarSource, "utf8")).toContain(`?? ${JSON.stringify(DEFAULT_MODEL)}`);
+  });
+
+  test("uses Granite without a query instruction and distinguishes old model indexes", () => {
+    expect(DEFAULT_MODEL).toBe("onnx-community/granite-embedding-311m-multilingual-r2-ONNX");
+    expect(queryPrefix(DEFAULT_MODEL)).toBe("");
+    expect(queryPrefix("Snowflake/snowflake-arctic-embed-m-v1.5")).toBe("Represent this sentence for searching relevant passages: ");
+    expect(embeddingIndexStatus("indexed")).toContain(DEFAULT_MODEL);
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    expect(pkg.dependencies["@huggingface/transformers"]).toBe("4.3.2");
+    expect(embeddingIndexStatus("indexed")).toContain("transformers-4.3.2");
   });
 
   test("splits large embedding inputs into bounded sidecar requests without reordering", async () => {

@@ -21,7 +21,7 @@ of the OpenCode memory-plugin landscape? See
 
 1. **Read** — v2 sessions/messages from OpenCode's `~/.local/share/opencode/opencode.db` (read-only)
 2. **Parse** — condensed exchanges (user text, assistant text, tool names; no reasoning blobs or tool output)
-3. **Embed** — local, offline embeddings via Transformers.js in a lazily started, idle-evictable system-Node sidecar (`Snowflake/snowflake-arctic-embed-m-v1.5` q8, 768 dims; retrieval prefix on search queries). Chosen by empirical eval on a real corpus — see [docs/embedding-model-eval.md](docs/embedding-model-eval.md)
+3. **Embed** — local, offline embeddings via Transformers.js in a lazily started, idle-evictable system-Node sidecar (`onnx-community/granite-embedding-311m-multilingual-r2-ONNX` q8, CLS pooling, 768 dims; no query/document prefix).
 4. **Index** — plain SQLite at `~/.local/share/opencode-episodic-memory/index.db` by default; optional libSQL/Turso remote storage can combine source-scoped indexes across devices
 5. **Recall** — native plugin tools `episodic_search` / `episodic_read_window` / `episodic_read_session`, plus a `remembering-conversations` skill that teaches the agent when to search
 6. **Stay fresh** — the plugin re-indexes each session when OpenCode reports its execution settled (`session.execution.succeeded` / `failed` / `interrupted`), and backfills a local index on startup. With a remote index, run `sync` from the CLI to backfill sessions that settled while the plugin was not indexing. Plugin log lines go to OpenCode's own log file (`$XDG_DATA_HOME/opencode/log/opencode.log`, default `~/.local/share/opencode/log/`), prefixed `[episodic-memory]`
@@ -143,13 +143,34 @@ instruction-tag match — the intent is the same, but our matching is literal.
 | `EPISODIC_INDEX_URL` | unset | Opt-in libSQL/Turso index URL; activates remote vector-only mode |
 | `EPISODIC_INDEX_AUTH_TOKEN` | unset | Required for remote network URLs; passed to `@libsql/client` |
 | `EPISODIC_SOURCE_ID` | unset | Required in remote mode; stable device/source identity |
-| `EPISODIC_EMBED_MODEL` | `Snowflake/snowflake-arctic-embed-m-v1.5` | Transformers.js embedding model |
+| `EPISODIC_EMBED_MODEL` | `onnx-community/granite-embedding-311m-multilingual-r2-ONNX` | Transformers.js embedding model |
+| `EPISODIC_MIN_SCORE` | `0.84` | Minimum vector cosine, 0–1; use `0` for unfiltered recall. Does not filter BM25 hits in text/hybrid mode. |
 | `EPISODIC_EMBED_MODE` | `sidecar` | `sidecar` runs embeddings in Node; `inline` is an explicit escape hatch |
 | `EPISODIC_NODE_BINARY` | `node` | Node 20+ executable used by sidecar mode |
 | `EPISODIC_EMBED_BATCH_SIZE` | `4` | Texts per sidecar request (1-64) |
 | `EPISODIC_EMBED_READY_TIMEOUT_MS` | `600000` | Maximum wait for sidecar/model startup |
 | `EPISODIC_EMBED_REQUEST_TIMEOUT_MS` | `120000` | Maximum wait for a post-startup embedding request |
 | `EPISODIC_EMBED_IDLE_TIMEOUT_MS` | `300000` | Stop an idle sidecar after this many milliseconds; `0` disables idle eviction |
+
+`episodic_search` also accepts a per-query `minScore` override.
+The default 0.84 is a Granite cosine operating point, not an opencode-mem
+hybrid score: it removes some noise but can omit relevant conversations.
+For broader recall use `minScore: 0` or `EPISODIC_MIN_SCORE=0`.
+Changing this cutoff does not require re-embedding; after changing the embedding
+model or recipe, back up the index and run `bun run src/cli.ts sync --force`.
+
+### Graniteへの移行
+
+このフォークの既定モデルはGranite 311M multilingual r2です。
+日本語の合成質問474問では、元会話への到達数が394問、検索文の埋め込み中央値が7.6msでした。
+人手による有用性評価ではなく、単一の会話集合に基づく結果です。
+閾値0.84は調整用の別の質問561問で選んでいます。
+
+Snowflakeも768次元ですが、ベクトルは互換ではありません。
+索引の状態にはモデル・集約・量子化・文字数上限・ライブラリ版を記録します。
+現在の設定と一致しないベクトルは検索から除外し、通常の同期でも再生成します。
+移行時はバックアップ後に強制同期を行い、完了後に検索を確認してください。
+元の本文・セッションID・アンカーは保持し、FTS用の行番号を変えるVACUUMは行いません。
 
 `EPISODIC_EMBED_MODE=inline` loads Transformers.js native addons directly in
 OpenCode's embedded Bun process. It exists only as an explicit compatibility

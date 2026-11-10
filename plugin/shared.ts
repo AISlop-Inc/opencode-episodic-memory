@@ -100,6 +100,7 @@ export function createMemory(log: (level: "info" | "warn" | "error", message: st
           after: z.string().optional().describe("Only conversations after YYYY-MM-DD"),
           before: z.string().optional().describe("Only conversations before YYYY-MM-DD"),
           limit: z.number().optional().describe("Max results, 1-50 (default 10)"),
+          minScore: z.number().min(0).max(1).optional().describe("Minimum vector cosine; default EPISODIC_MIN_SCORE or 0.84 for Granite. Use 0 for broader recall. Does not filter lexical hits."),
         },
         async execute(args) {
           if (remoteIndexConfig() && (args.mode === "text" || args.mode === "hybrid" || args.text !== undefined)) {
@@ -115,6 +116,7 @@ export function createMemory(log: (level: "info" | "warn" | "error", message: st
             after: after.ms,
             before: before.ms,
             text: typeof args.text === "string" ? args.text : undefined,
+            minScore: args.minScore,
           };
           const noHits = async () => await index.isEmpty()
             ? "No matching past conversations found. The index is empty — run `bun run src/cli.ts sync` to index conversations."
