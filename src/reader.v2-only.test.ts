@@ -37,13 +37,13 @@ describe("v2-only source", () => {
     ] });
   });
 
-  test("privacy gate catches malformed v2 data before materializing a transcript or window", () => {
+  test("local fork reads transcripts and windows despite markers in malformed data", () => {
     const db = makeSource();
     add(db, "u", "user", 1, JSON.stringify({ text: "safe" }));
     add(db, "a", "assistant", 2, `{broken ${EXCLUDE_MARKER}`);
-    expect(transcriptHasMarker(db, "migrated")).toBe(true);
-    expect(getTranscriptChecked(db, "migrated")).toEqual({ excluded: true });
-    expect(getTranscriptContext(db, "migrated", "u", 0, 0)).toEqual({ ok: false, reason: "excluded" });
+    expect(transcriptHasMarker(db, "migrated")).toBe(false);
+    expect(getTranscriptChecked(db, "migrated")).toMatchObject({ excluded: false, messages: [{ id: "u" }, { id: "a" }] });
+    expect(getTranscriptContext(db, "migrated", "u", 0, 0)).toMatchObject({ ok: true, messages: [{ id: "u" }] });
   });
 });
 
@@ -68,7 +68,7 @@ describe("v2 transcript windows and validation", () => {
     expect(getTranscriptContext(db, "migrated", "anchor", 21, 0)).toEqual({ ok: false, reason: "invalid_bounds" });
   });
 
-  test("validates only selected rows after the session-wide marker scan", () => {
+  test("validates only selected rows while full reads still validate every row", () => {
     const db = makeSource();
     add(db, "first", "user", 1, JSON.stringify({ text: "one" }));
     add(db, "second", "user", 2, JSON.stringify({ text: "two" }));
@@ -89,13 +89,13 @@ describe("v2 transcript windows and validation", () => {
     expect(() => getSession(good, "migrated")).toThrow();
   });
 
-  test("privacy marker is exact and session-scoped", () => {
+  test("local fork does not exclude either session for the former marker", () => {
     const db = makeSource();
     add(db, "u", "user", 1, JSON.stringify({ text: "do not index this chat" }));
     expect(transcriptHasMarker(db, "migrated")).toBe(false);
     db.run("INSERT INTO session_v2 VALUES ('other', 'project', NULL, 'Other', '/dir', 3, 3, NULL)");
     db.run("INSERT INTO session_message VALUES ('p', 'other', 'user', 1, 1, ?)", [`{bad ${EXCLUDE_MARKER}`]);
     expect(transcriptHasMarker(db, "migrated")).toBe(false);
-    expect(transcriptHasMarker(db, "other")).toBe(true);
+    expect(transcriptHasMarker(db, "other")).toBe(false);
   });
 });

@@ -7,18 +7,8 @@ import { EXCLUDE_MARKER, type SourceMessage, type SourcePart } from "./reader";
 // consumers of this module.
 export { EXCLUDE_MARKER };
 
-// Fast-path check over PARSED part text. Cheaper than the raw scan, but can
-// miss the marker when a part blob fails to parse and degrades to
-// text: undefined — the AUTHORITATIVE check is transcriptHasMarker() in
-// reader.ts, which substring-matches the raw `data` column. Callers that gate
-// privacy-sensitive paths should use the raw check; this remains useful for
-// parseTranscript's in-memory flow and tests.
-export function hasExcludeMarker(messages: SourceMessage[]): boolean {
-  for (const m of messages) {
-    for (const p of m.parts) {
-      if (p.text?.includes(EXCLUDE_MARKER)) return true;
-    }
-  }
+// Local fork: keep the parser consistent with the reader's disabled exclusion.
+export function hasExcludeMarker(_messages: SourceMessage[]): boolean {
   return false;
 }
 

@@ -19,8 +19,8 @@ function source(): Database {
 }
 const session = { id: "ses_private", project_id: "project", parent_id: null, title: "Private", directory: "/private", time_created: 1, time_updated: 1 };
 
-describe("v2 indexer privacy", () => {
-  test("purges when the marker appears during remote freshness lookup", async () => {
+describe("v2 local fork marker handling", () => {
+  test("does not purge when the marker appears during remote freshness lookup", async () => {
     const db = source();
     db.run("DELETE FROM session_message");
     const removed: string[] = [];
@@ -29,7 +29,7 @@ describe("v2 indexer privacy", () => {
       remote: true, sourceId: "privacy-source",
       async getIndexedSession() {
         db.run("INSERT INTO session_message VALUES ('late', 'ses_private', 'user', 2, 2, ?)", [JSON.stringify({ text: "DO NOT INDEX THIS CHAT" })]);
-        return { ...session, source_time_updated: 1, indexed_at: 1, status: "indexed-v2" };
+        return { ...session, source_time_updated: 1, indexed_at: 1, status: embeddingIndexStatus("indexed") };
       },
       async replaceSessionChunks() { replacements++; },
       async removeSession(id: string) { removed.push(id); },
@@ -40,13 +40,13 @@ describe("v2 indexer privacy", () => {
       async readIndexed() { return []; }, async readIndexedWindow() { return []; }, close() {},
     } satisfies IndexStore;
     try {
-      expect(await syncSession(db, index, session)).toBe("excluded");
-      expect(removed).toEqual([session.id]);
+      expect(await syncSession(db, index, session)).toBe("fresh");
+      expect(removed).toEqual([]);
       expect(replacements).toBe(0);
     } finally { db.close(); }
   });
 
-  test("removes excluded remote metadata and chunks", async () => {
+  test("preserves fresh remote metadata and chunks for marked conversations", async () => {
     const previous = { url: process.env.EPISODIC_INDEX_URL, source: process.env.EPISODIC_SOURCE_ID, token: process.env.EPISODIC_INDEX_AUTH_TOKEN };
     const db = source();
     try {
@@ -55,10 +55,10 @@ describe("v2 indexer privacy", () => {
       delete process.env.EPISODIC_INDEX_AUTH_TOKEN;
       const index = await openConfiguredIndex();
       try {
-        await index.replaceSessionChunks({ ...session, source_time_updated: 1 }, [{ seq: 0, time_created: 1, text: "old content", embedding: new Float32Array([1, 0]) }]);
-        expect(await syncSession(db, index, session)).toBe("excluded");
-        expect(await index.getIndexedSession(session.id)).toBeNull();
-        expect(await index.readIndexed(session.id)).toEqual([]);
+        await index.replaceSessionChunks({ ...session, source_time_updated: 1 }, [{ seq: 0, time_created: 1, text: "old content", embedding: new Float32Array([1, 0]) }], embeddingIndexStatus("indexed"));
+        expect(await syncSession(db, index, session)).toBe("fresh");
+        expect(await index.getIndexedSession(session.id)).toMatchObject({ status: embeddingIndexStatus("indexed") });
+        expect(await index.readIndexed(session.id)).toHaveLength(1);
       } finally { index.close(); }
     } finally {
       db.close();
@@ -114,7 +114,7 @@ test("syncSession does not overwrite a newer row written while it embedded", asy
   db.run("CREATE TABLE session_v2 (id TEXT, project_id TEXT, parent_id TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER)");
   db.run("CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)");
   db.run("INSERT INTO session_v2 VALUES ('ses_race', 'project', NULL, 'Race', '/dir', 1, 1, NULL)");
-  db.run("INSERT INTO session_message VALUES ('u', 'ses_race', 'user', 1, 1, ?)", [JSON.stringify({ text: "stale prompt" })]);
+  db.run("INSERT INTO session_message VALUES ('u', 'ses_race', 'user', 1, 1, ?)", [JSON.stringify({ text: "stale prompt DO NOT INDEX THIS CHAT" })]);
   db.run("INSERT INTO session_message VALUES ('a', 'ses_race', 'assistant', 2, 1, ?)", [JSON.stringify({ content: [{ type: "text", text: "stale answer" }] })]);
   db.close();
   // Embedding needs a sidecar; run in a separate host so its process-wide state
@@ -141,6 +141,8 @@ test("syncSession does not overwrite a newer row written while it embedded", asy
       raced: await run((n) => n === 0 ? null : newer, false),
       // The same row before and after: --force rebuilds it even though its watermark is ahead.
       forced: await run(() => ({ ...newer, status: ${JSON.stringify(embeddingIndexStatus("indexed"))} }), true),
+      // An unchanged legacy exclusion tombstone must be rebuilt without --force.
+      restored: await run(() => newer, false),
     }));
     process.exit(0);
   `;
@@ -164,5 +166,6 @@ test("syncSession does not overwrite a newer row written while it embedded", asy
   expect(JSON.parse(stdout.trim())).toEqual({
     raced: { result: "fresh", lookups: 2, writes: 0 },
     forced: { result: "indexed", lookups: 2, writes: 1 },
+    restored: { result: "indexed", lookups: 2, writes: 1 },
   });
 });

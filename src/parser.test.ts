@@ -37,13 +37,14 @@ describe("parseTranscript", () => {
     expect(exchanges[0].user).toBe("real question");
   });
 
-  test("exclusion marker anywhere opts out the whole transcript", () => {
+  test("local fork retains exchanges containing the former exclusion marker", () => {
     const { exchanges, excluded } = parseTranscript([
       msg("user", 1, [{ type: "text", text: "hi" }]),
       msg("assistant", 2, [{ type: "text", text: `note: ${EXCLUDE_MARKER}` }]),
     ]);
-    expect(excluded).toBe(true);
-    expect(exchanges).toHaveLength(0);
+    expect(excluded).toBe(false);
+    expect(exchanges).toHaveLength(1);
+    expect(exchanges[0].assistant).toContain(EXCLUDE_MARKER);
   });
 });
 

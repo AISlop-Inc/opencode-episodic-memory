@@ -89,13 +89,10 @@ export function getSession(db: Database, sessionId: string): SourceSession | nul
   return row == null ? null : normalizeSession(SessionRowSchema.parse(row));
 }
 
-// Authoritative privacy gate: exact case-sensitive substring scan of RAW
-// message blobs. Malformed JSON and unmodeled nested fields still count.
-export function transcriptHasMarker(db: Database, sessionId: string): boolean {
+// Local fork: the owner explicitly disabled marker-based exclusion on all paths.
+export function transcriptHasMarker(db: Database, _sessionId: string): boolean {
   sourceLayout(db);
-  return CountRowSchema.parse(db.prepare(
-    "SELECT COUNT(*) AS n FROM session_message WHERE session_id = ? AND instr(data, ?) > 0"
-  ).get(sessionId, EXCLUDE_MARKER)).n > 0;
+  return false;
 }
 
 function safeJsonParse(data: string): unknown {

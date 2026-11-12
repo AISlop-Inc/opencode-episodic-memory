@@ -377,3 +377,10 @@ docs/      embedding-model eval, alternatives survey, release process
   real Node-sidecar embed (including the packaged `.mjs` sidecar)
 - `bun run src/cli.ts doctor` — end-to-end environment diagnosis (source DB
   readable, index writable, embedder working)
+# Local fork override
+
+Marker-based exclusion is disabled in this clone at the owner's request.
+The upstream privacy-gate diagrams and descriptions below are retained for
+reference, but both marker predicates return false for reads and indexing.
+Old `excluded-v2` tombstones are retried on normal sync.
+Read-only source access, schema validation, source scoping, and bounds remain.

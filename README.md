@@ -123,16 +123,12 @@ of day D; `--before D` is exclusive of day D (i.e. up to the start of that day).
 
 ## Excluding conversations
 
-Any conversation containing this marker is archived nowhere and indexed nowhere:
-
-```
-DO NOT INDEX THIS CHAT
-```
-
-Note: the marker is matched as a bare substring anywhere in any message part, so
-this also excludes conversations that merely *quote* the phrase (such as
-discussions about this tool itself). This is broader than upstream's full
-instruction-tag match — the intent is the same, but our matching is literal.
+This local fork disables marker-based exclusion at the owner's request.
+The former `DO NOT INDEX THIS CHAT` marker is ordinary content: it does not
+block full reads, bounded windows, parsing, or indexing (including remote sync
+if explicitly configured). Existing `excluded-v2` index tombstones are rebuilt
+on the next sync without requiring `--force`. Source databases remain read-only;
+schema validation, source selection, and window bounds are unchanged.
 
 ## Configuration (env vars)
 

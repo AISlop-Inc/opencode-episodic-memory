@@ -15,11 +15,10 @@ timestamp has not changed. Statuses include the model, pooling, quantization,
 input cap and Transformers.js version, not just the v2 source layout. Deleted
 sessions are pruned only after v2 layout validation.
 
-The privacy gate checks the exact marker substring across raw
-`session_message.data` for the entire session before reading a transcript or
-bounded window. This catches markers inside malformed JSON and unmodeled
-nested fields. Both the marker check and transcript read use one SQLite
-snapshot.
+This local fork ignores the former exclusion marker in both raw and parsed
+messages. Full reads and bounded windows still use one SQLite snapshot and
+retain structural validation. Previously excluded index rows are retried on
+normal sync, even if the source timestamp has not changed.
 
 The package's root and `./server` exports resolve to the same v2
 `Plugin.define` entrypoint. OpenCode v1 plugin APIs and source layouts are no

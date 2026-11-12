@@ -39,7 +39,8 @@ export async function syncSession(
   // Earlier indexes used unqualified statuses. Force one v2 reindex even when
   // migrated sessions retain their IDs and timestamps.
   const status = embeddingIndexStatus;
-  if (!force && prior && isCurrentIndexStatus(prior.status) && prior.source_time_updated >= s.time_updated) return "fresh";
+  // Revisit old exclusion tombstones now that the local fork indexes marked chats.
+  if (!force && prior && prior.status !== status("excluded") && isCurrentIndexStatus(prior.status) && prior.source_time_updated >= s.time_updated) return "fresh";
 
   // Authoritative opt-out gate lives inside getTranscriptChecked (raw-blob
   // scan before any read); parseTranscript's own parsed-text check is a

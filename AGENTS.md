@@ -3,6 +3,15 @@
 Inspired by obra/episodic-memory.
 Semantic search over past OpenCode conversations via native plugin tools.
 
+## Local fork override (2026-11-06)
+
+The owner explicitly disabled marker-based exclusion for this local clone.
+`transcriptHasMarker` and `hasExcludeMarker` return false; their interfaces stay
+compatible with upstream. All paths, including configured remote sync, ignore
+the old marker. Existing `excluded-v2` tombstones are not considered fresh.
+Privacy-gate descriptions below document upstream, not this local behavior.
+Keep read-only source access, schema validation, and source/anchor/bounds checks.
+
 ## Layout
 
 - `ARCHITECTURE.md` — system overview with Mermaid diagrams (data model,
